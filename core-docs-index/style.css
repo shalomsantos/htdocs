@@ -1,0 +1,4 @@
+body { background: #f5f7fb; color: #182438; }
+.hero { background: linear-gradient(110deg, #142746, #275ca0); color: #fff; }
+.path { font-size: .78rem; overflow-wrap: anywhere; }
+.route-url, .route-body { overflow-wrap: anywhere; white-space: pre-wrap; }
