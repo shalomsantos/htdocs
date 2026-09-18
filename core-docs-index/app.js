@@ -34,16 +34,22 @@ try {
     logs = [];
 }
 
+document.getElementById('read-paths').addEventListener('click', () => window.location.reload());
+
 const eventElement = document.getElementById('scan-event');
-const event = eventElement ? JSON.parse(eventElement.textContent) : null;
-if (event && event.project && event.message) {
+const events = eventElement ? JSON.parse(eventElement.textContent) : [];
+const pendingEvents = Array.isArray(events) ? events : [events];
+pendingEvents.forEach(event => {
+    if (!event || !event.project || !event.message) return;
     logs.unshift({
         time: new Date().toISOString(),
         project: event.project,
         message: event.message
     });
-    logs = logs.slice(0, 100);
     unreadCount++;
+});
+if (pendingEvents.length) {
+    logs = logs.slice(0, 100);
     try {
         localStorage.setItem(unreadKey, String(unreadCount));
         localStorage.setItem(logKey, JSON.stringify(logs));

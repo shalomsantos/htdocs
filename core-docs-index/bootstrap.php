@@ -220,33 +220,51 @@ if ($method === 'POST' && $action === 'refresh' && is_string($target)
     $old = $_SESSION['htdocs_projects'][$target] ?? emptyProject($target);
     $new = scanProject($root, $target);
     $_SESSION['htdocs_projects'][$target] = $new;
-    $_SESSION['htdocs_flash'] = [
+    $_SESSION['htdocs_flash'] = [[
         'project' => '/' . $target,
         'message' => 'releitura realizada: ' . changesText($old, $new),
-    ];
+    ]];
+    $_SESSION['htdocs_skip_root_once'] = true;
 }
-if ($method !== 'POST' || $action === 'scan') {
+$skipRoot = $method !== 'POST' && !empty($_SESSION['htdocs_skip_root_once']);
+if ($method !== 'POST') unset($_SESSION['htdocs_skip_root_once']);
+if ($method !== 'POST' && !$skipRoot) {
+    $found = [];
     $newCount = 0;
+    $removedCount = 0;
     foreach (new DirectoryIterator($root) as $item) {
         if (!$item->isDir() || $item->isDot() || substr($item->getFilename(), 0, 1) === '.' || $item->getFilename() === 'core-docs-index') continue;
         $folder = $item->getFilename();
+        $found[$folder] = true;
         if (isset($_SESSION['htdocs_projects'][$folder])) continue;
         $_SESSION['htdocs_projects'][$folder] = emptyProject($folder);
         $newCount++;
     }
-    if ($action === 'scan') {
-        $_SESSION['htdocs_flash'] = [
-            'project' => 'Vasculhar htdocs',
-            'message' => 'varredura realizada: + ' . $newCount . ' ' . ($newCount === 1 ? 'projeto encontrado' : 'projetos encontrados')
-                . ($newCount ? ', pronto para vasculhar suas páginas.' : '.'),
+    foreach (array_keys($_SESSION['htdocs_projects']) as $folder) {
+        if (isset($found[$folder])) continue;
+        unset($_SESSION['htdocs_projects'][$folder]);
+        $removedCount++;
+    }
+    if (empty($_SESSION['htdocs_clear_client'])) {
+        $changes = [];
+        if ($newCount) $changes[] = '+ ' . $newCount . ' ' . ($newCount === 1 ? 'projeto encontrado' : 'projetos encontrados');
+        if ($removedCount) $changes[] = '- ' . $removedCount . ' ' . ($removedCount === 1 ? 'projeto removido' : 'projetos removidos');
+        $events = $_SESSION['htdocs_flash'] ?? [];
+        if (isset($events['project'])) $events = [$events];
+        $events[] = [
+            'project' => 'htdocs',
+            'message' => $changes
+                ? 'varredura realizada: ' . implode('; ', $changes) . '.'
+                : 'varredura realizada: nenhum projeto novo ou removido.',
         ];
+        $_SESSION['htdocs_flash'] = $events;
     }
 }
 if ($method === 'POST') {
     header('Location: ' . ($_SERVER['PHP_SELF'] ?? '/index.php'));
     exit;
 }
-$scanEvent = $_SESSION['htdocs_flash'] ?? null;
+$scanEvent = $_SESSION['htdocs_flash'] ?? [];
 $clearClient = !empty($_SESSION['htdocs_clear_client']);
 unset($_SESSION['htdocs_flash'], $_SESSION['htdocs_clear_client']);
 $projects = array_values($_SESSION['htdocs_projects']);
