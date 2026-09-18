@@ -9,7 +9,9 @@ function h(string $value): string {
     return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 function url(string $path): string {
-    return '/' . implode('/', array_map('rawurlencode', explode('/', trim(str_replace('\\', '/', $path), '/'))));
+    $clean = str_replace('\\', '/', $path);
+    $result = '/' . implode('/', array_map('rawurlencode', explode('/', trim($clean, '/'))));
+    return substr($clean, -1) === '/' ? $result . '/' : $result;
 }
 function entryPoint(string $directory, string $folder): ?string {
     foreach (['index.php', 'home.php', 'public/index.php', 'public/home.php'] as $file) {
@@ -17,7 +19,7 @@ function entryPoint(string $directory, string $folder): ?string {
     }
     return null;
 }
-function phpScreens(string $directory, string $prefix, bool $recursive = false): array {
+function phpScreens(string $directory, string $prefix, bool $recursive = false, bool $htmlOnly = false): array {
     if (!is_dir($directory)) return [];
     $files = [];
     $iterator = $recursive
@@ -27,10 +29,37 @@ function phpScreens(string $directory, string $prefix, bool $recursive = false):
         if (!$item->isFile() || strtolower($item->getExtension()) !== 'php') continue;
         $relative = str_replace('\\', '/', substr($item->getPathname(), strlen($directory) + 1));
         if (substr(basename($relative), 0, 1) === '_') continue;
+        if ($htmlOnly) {
+            $source = file_get_contents($item->getPathname(), false, null, 0, 65536);
+            if (!is_string($source) || !preg_match('/<(?:!doctype\\s+html|html|body|main|section|header|div|form|article|h[1-6])\\b/i', $source)) continue;
+        }
         $files[] = $prefix . '/' . $relative;
     }
     natcasesort($files);
     return array_values($files);
+}
+function screenFolders(string $directory): array {
+    $found = ['views' => [], 'pages' => []];
+    $parents = ['' => $directory];
+    foreach (new DirectoryIterator($directory) as $item) {
+        if ($item->isDir() && !$item->isDot() && substr($item->getFilename(), 0, 1) !== '.'
+            && !in_array(strtolower($item->getFilename()), ['vendor', 'node_modules', 'view', 'views', 'page', 'pages'], true)) {
+            $parents[$item->getFilename()] = $item->getPathname();
+        }
+    }
+    foreach ($parents as $parentName => $parentPath) {
+        foreach (new DirectoryIterator($parentPath) as $item) {
+            if (!$item->isDir() || $item->isDot()) continue;
+            $name = strtolower($item->getFilename());
+            $kind = in_array($name, ['view', 'views'], true) ? 'views'
+                : (in_array($name, ['page', 'pages'], true) ? 'pages' : null);
+            if ($kind !== null) {
+                $relative = $parentName === '' ? $item->getFilename() : $parentName . '/' . $item->getFilename();
+                $found[$kind][$relative] = $item->getPathname();
+            }
+        }
+    }
+    return $found;
 }
 function routesIn(string $file): array {
     if (!is_file($file)) return [];
@@ -55,6 +84,17 @@ function routesIn(string $file): array {
         $routes[] = ['methods' => $methods, 'path' => $path, 'params' => $params[1]];
     }
     return $routes;
+}
+function screenUrl(string $folder, string $path): string {
+    if ($folder === 'shalom') {
+        $routes = [
+            'shalom/app/Views/landing.php' => 'shalom/public/',
+            'shalom/app/Views/login.php' => 'shalom/public/login',
+            'shalom/app/Views/restricted-area.php' => 'shalom/public/area-restrita',
+        ];
+        if (isset($routes[$path])) return url($routes[$path]);
+    }
+    return url($path);
 }
 function screenTitle(string $path): string {
     $name = pathinfo($path, PATHINFO_FILENAME);
@@ -89,54 +129,114 @@ function scanProject(string $root, string $folder): array {
             $sections['Páginas internas'] = phpScreens($directory . '/views/internal', $folder . '/views/internal', true);
             $buttons[] = ['Autores', url('front-ds-portal/views/listings/author/author.php')];
         } elseif ($folder === 'shalom' && is_file($directory . '/public/index.php')) {
-            $entry = 'shalom/public/index.php';
+            $entry = 'shalom/public/';
         }
-        $sections['Páginas'] = phpScreens($directory, $folder);
-        foreach (['views', 'Views', 'pages', 'Pages'] as $viewFolder) {
-            if ($folder !== 'front-ds-portal' && is_dir($directory . '/' . $viewFolder)) {
-                $sections[$viewFolder] = phpScreens($directory . '/' . $viewFolder, $folder . '/' . $viewFolder, true);
+        if ($folder !== 'front-ds-portal') {
+            // Primeiro views, depois pages; só por último lemos PHPs da raiz.
+            foreach (screenFolders($directory) as $folders) {
+                foreach ($folders as $relative => $screenDir) {
+                    $paths = phpScreens($screenDir, $folder . '/' . $relative, true, true);
+                    $sections[$relative] = array_values(array_filter($paths, function ($path) {
+                        return !preg_match('~/(?:components?|partials?|layouts?|helpers?|includes?)/~i', $path);
+                    }));
+                }
             }
         }
+        $sections['./*.php (raiz)'] = phpScreens($directory, $folder, false, true);
         if ($entry !== null) array_unshift($buttons, ['Home', url($entry)]);
     }
     return compact('folder', 'entry', 'type', 'sections', 'buttons', 'apiRoutes', 'webRoutes');
 }
-function addLog(string $message): void {
-    array_unshift($_SESSION['htdocs_logs'], ['time' => date('d/m/Y H:i:s'), 'message' => $message]);
-    $_SESSION['htdocs_logs'] = array_slice($_SESSION['htdocs_logs'], 0, 60);
+function emptyProject(string $folder): array {
+    return [
+        'folder' => $folder, 'entry' => null, 'type' => 'Pendente',
+        'sections' => [], 'buttons' => [], 'apiRoutes' => [], 'webRoutes' => [],
+    ];
+}
+function screenIndex(array $project): array {
+    $index = [];
+    foreach ($project['sections'] ?? [] as $section => $paths) {
+        $kind = stripos($section, 'list') !== false ? 'listagem'
+            : (stripos($section, 'intern') !== false ? 'página interna' : 'página');
+        foreach ($paths as $path) $index[$path] = $kind;
+    }
+    return $index;
+}
+function changesText(array $old, array $new): string {
+    $previous = screenIndex($old);
+    $current = screenIndex($new);
+    $parts = [];
+    foreach (['+' => array_diff_key($current, $previous), '-' => array_diff_key($previous, $current)] as $sign => $changes) {
+        foreach (array_count_values($changes) as $kind => $count) {
+            $plural = ['listagem' => 'listagens', 'página' => 'páginas', 'página interna' => 'páginas internas'];
+            $label = $count === 1 ? $kind : $plural[$kind];
+            $parts[] = $sign . ' ' . $count . ' ' . $label . ($sign === '+' ? ' encontrada' : ' removida') . ($count === 1 ? '' : 's');
+        }
+    }
+    $oldRoutes = count($old['apiRoutes'] ?? []);
+    $newRoutes = count($new['apiRoutes'] ?? []);
+    if ($newRoutes !== $oldRoutes) {
+        $delta = $newRoutes - $oldRoutes;
+        $parts[] = ($delta > 0 ? '+' : '-') . ' ' . abs($delta) . ' ' . (abs($delta) === 1 ? 'rota API' : 'rotas API');
+    }
+    return $parts ? implode('; ', $parts) . '.' : 'nenhuma mudança encontrada.';
 }
 
 if (!isset($_SESSION['htdocs_projects']) || !is_array($_SESSION['htdocs_projects'])) {
     $_SESSION['htdocs_projects'] = [];
-    $_SESSION['htdocs_logs'] = [];
+}
+unset($_SESSION['htdocs_logs']);
+if (isset($_SESSION['htdocs_projects']['shalom']['buttons'])) {
+    foreach ($_SESSION['htdocs_projects']['shalom']['buttons'] as &$button) {
+        if ($button[1] === '/shalom/public/index.php') $button[1] = '/shalom/public/';
+    }
+    unset($button);
 }
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $action = $_POST['action'] ?? '';
 $target = $_POST['folder'] ?? '';
+if ($method === 'POST' && $action === 'clear') {
+    $_SESSION['htdocs_projects'] = [];
+    unset($_SESSION['htdocs_flash'], $_SESSION['htdocs_logs']);
+    $_SESSION['htdocs_clear_client'] = true;
+}
 if ($method === 'POST' && $action === 'refresh' && is_string($target)
     && preg_match('/^[a-zA-Z0-9._-]+$/', $target)
     && is_dir($root . '/' . $target)
     && $target !== 'core-docs-index'
     && substr($target, 0, 1) !== '.') {
-    $_SESSION['htdocs_projects'][$target] = scanProject($root, $target);
-    addLog($target . ': releitura concluída. ' . count($_SESSION['htdocs_projects'][$target]['apiRoutes']) . ' rotas API detectadas.');
+    $old = $_SESSION['htdocs_projects'][$target] ?? emptyProject($target);
+    $new = scanProject($root, $target);
+    $_SESSION['htdocs_projects'][$target] = $new;
+    $_SESSION['htdocs_flash'] = [
+        'project' => '/' . $target,
+        'message' => 'releitura realizada: ' . changesText($old, $new),
+    ];
 }
 if ($method !== 'POST' || $action === 'scan') {
-    $new = 0;
+    $newCount = 0;
     foreach (new DirectoryIterator($root) as $item) {
         if (!$item->isDir() || $item->isDot() || substr($item->getFilename(), 0, 1) === '.' || $item->getFilename() === 'core-docs-index') continue;
         $folder = $item->getFilename();
         if (isset($_SESSION['htdocs_projects'][$folder])) continue;
-        $_SESSION['htdocs_projects'][$folder] = scanProject($root, $folder);
-        addLog($folder . ': novo projeto mapeado como ' . $_SESSION['htdocs_projects'][$folder]['type'] . '.');
-        $new++;
+        $_SESSION['htdocs_projects'][$folder] = emptyProject($folder);
+        $newCount++;
     }
-    if ($action === 'scan') addLog($new ? $new . ' novo(s) projeto(s) encontrado(s).' : 'Nenhum projeto novo encontrado; os já mapeados foram mantidos em cache.');
+    if ($action === 'scan') {
+        $_SESSION['htdocs_flash'] = [
+            'project' => 'Vasculhar htdocs',
+            'message' => 'varredura realizada: + ' . $newCount . ' ' . ($newCount === 1 ? 'projeto encontrado' : 'projetos encontrados')
+                . ($newCount ? ', pronto para vasculhar suas páginas.' : '.'),
+        ];
+    }
 }
 if ($method === 'POST') {
     header('Location: ' . ($_SERVER['PHP_SELF'] ?? '/index.php'));
     exit;
 }
+$scanEvent = $_SESSION['htdocs_flash'] ?? null;
+$clearClient = !empty($_SESSION['htdocs_clear_client']);
+unset($_SESSION['htdocs_flash'], $_SESSION['htdocs_clear_client']);
 $projects = array_values($_SESSION['htdocs_projects']);
 usort($projects, function ($a, $b) {
     $order = ['wordpress', 'shalom', 'portal', 'front-ds-portal', 'fdr-institucional'];
