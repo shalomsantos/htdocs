@@ -26,6 +26,7 @@ require __DIR__ . '/core-docs-index/bootstrap.php';
         <div class="col-md-7 d-flex flex-wrap gap-2">
             <input type="search" id="search" class="form-control" placeholder="Buscar projeto ou tela" aria-label="Buscar projeto ou tela">
             <form method="post" class="m-0"><input type="hidden" name="action" value="scan"><button class="btn btn-outline-primary text-nowrap"><i class="fa-solid fa-magnifying-glass me-1" aria-hidden="true"></i>Vasculhar htdocs</button></form>
+            <?php if ($phpMyAdminUrl): ?><a class="btn btn-outline-secondary text-nowrap" href="<?= h($phpMyAdminUrl) ?>"><i class="fa-solid fa-database me-1" aria-hidden="true"></i>phpMyAdmin</a><?php endif; ?>
             <button class="btn btn-outline-secondary text-nowrap" data-bs-toggle="modal" data-bs-target="#logsModal"><i class="fa-solid fa-clock-rotate-left me-1" aria-hidden="true"></i>Logs <span id="logs-count" class="badge rounded-pill text-bg-danger ms-1 d-none" aria-label="Novos registros"></span></button>
             <form method="post" class="m-0"><input type="hidden" name="action" value="clear"><button class="btn btn-outline-danger text-nowrap"><i class="fa-solid fa-eraser me-1" aria-hidden="true"></i>Limpar sessão</button></form>
         </div>
@@ -40,6 +41,7 @@ require __DIR__ . '/core-docs-index/bootstrap.php';
     <div class="row g-4" id="projects">
         <?php foreach ($projects as $project):
             $folder = $project['folder'];
+            $editorUrl = vscodeUrl($root, $folder);
             $screens = [];
             foreach ($project['sections'] as $items) $screens = array_merge($screens, $items);
             $searchData = strtolower($folder . ' ' . $project['type'] . ' ' . implode(' ', $screens));
@@ -51,11 +53,19 @@ require __DIR__ . '/core-docs-index/bootstrap.php';
                         <h3 class="h5 card-title mb-0"><i class="fa-solid fa-folder text-secondary me-2" aria-hidden="true"></i><?= h($folder) ?></h3>
                         <span class="badge text-bg-light border"><?= h($project['type']) ?></span>
                     </div>
-                    <p class="path text-secondary mb-3">/<?= h($folder) ?>/</p>
+                    <p class="path text-secondary mb-1">/<?= h($folder) ?>/</p>
+                    <p class="small text-secondary mb-3"><i class="fa-regular fa-clock me-1" aria-hidden="true"></i>Última varredura:
+                        <?php if (!empty($project['scannedAt'])): ?>
+                            <time class="scan-time" datetime="<?= h($project['scannedAt']) ?>"><?= h($project['scannedAt']) ?></time>
+                        <?php else: ?>ainda não realizada<?php endif; ?>
+                    </p>
                     <div class="d-flex flex-wrap gap-2">
                         <?php foreach ($project['buttons'] as $button): ?>
                             <a class="btn btn-sm btn-<?= $button[0] === 'Home' || $button[0] === 'Abrir portal' ? 'primary' : 'outline-primary' ?>" href="<?= h($button[1]) ?>"><i class="fa-solid <?= $button[0] === 'Home' ? 'fa-house' : ($button[0] === 'Temas' ? 'fa-palette' : 'fa-arrow-up-right-from-square') ?> me-1" aria-hidden="true"></i><?= h($button[0]) ?></a>
                         <?php endforeach; ?>
+                        <?php if ($editorUrl): ?>
+                            <a class="btn btn-sm btn-outline-secondary" href="<?= h($editorUrl) ?>" title="Abrir a pasta no VS Code"><i class="fa-solid fa-code me-1" aria-hidden="true"></i>VS Code</a>
+                        <?php endif; ?>
                         <?php if ($project['apiRoutes']): ?>
                             <button type="button" class="btn btn-sm btn-outline-info" data-bs-toggle="modal" data-bs-target="#api-<?= h($folder) ?>"><i class="fa-solid fa-code me-1" aria-hidden="true"></i>Rotas API (<?= count($project['apiRoutes']) ?>)</button>
                         <?php endif; ?>

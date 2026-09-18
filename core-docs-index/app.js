@@ -112,3 +112,10 @@ document.getElementById('clear-logs').addEventListener('click', () => {
     }
     renderLogs();
 });
+
+document.querySelectorAll('.scan-time').forEach(time => {
+    time.textContent = new Date(time.dateTime).toLocaleString('pt-BR', {
+        dateStyle: 'short',
+        timeStyle: 'short'
+    });
+});

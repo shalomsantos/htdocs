@@ -4,6 +4,7 @@ if (!defined('CORE_DOCS_INDEX')) { http_response_code(403); exit; }
 session_start();
 
 $root = dirname(__DIR__);
+$phpMyAdminUrl = '/phpmyadmin/'; // Use null para ocultar o atalho.
 
 function h(string $value): string {
     return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
@@ -12,6 +13,16 @@ function url(string $path): string {
     $clean = str_replace('\\', '/', $path);
     $result = '/' . implode('/', array_map('rawurlencode', explode('/', trim($clean, '/'))));
     return substr($clean, -1) === '/' ? $result . '/' : $result;
+}
+function vscodeUrl(string $root, string $folder): ?string {
+    $path = realpath($root . '/' . $folder);
+    if ($path === false || !is_dir($path)) return null;
+    $parts = explode('/', str_replace('\\', '/', $path));
+    $encoded = array_map('rawurlencode', $parts);
+    if (preg_match('/^[a-z]%3A$/i', $encoded[0])) {
+        $encoded[0] = strtolower(substr($parts[0], 0, 1)) . ':';
+    }
+    return 'vscode://file/' . implode('/', $encoded) . '/';
 }
 function entryPoint(string $directory, string $folder): ?string {
     foreach (['index.php', 'home.php', 'public/index.php', 'public/home.php'] as $file) {
@@ -145,12 +156,13 @@ function scanProject(string $root, string $folder): array {
         $sections['./*.php (raiz)'] = phpScreens($directory, $folder, false, true);
         if ($entry !== null) array_unshift($buttons, ['Home', url($entry)]);
     }
-    return compact('folder', 'entry', 'type', 'sections', 'buttons', 'apiRoutes', 'webRoutes');
+    $scannedAt = date('c');
+    return compact('folder', 'entry', 'type', 'sections', 'buttons', 'apiRoutes', 'webRoutes', 'scannedAt');
 }
 function emptyProject(string $folder): array {
     return [
         'folder' => $folder, 'entry' => null, 'type' => 'Pendente',
-        'sections' => [], 'buttons' => [], 'apiRoutes' => [], 'webRoutes' => [],
+        'sections' => [], 'buttons' => [], 'apiRoutes' => [], 'webRoutes' => [], 'scannedAt' => null,
     ];
 }
 function screenIndex(array $project): array {
